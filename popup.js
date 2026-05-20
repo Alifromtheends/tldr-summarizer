@@ -18,9 +18,120 @@ const els = {
   copyBtn: document.getElementById('copy'),
   openBtn: document.getElementById('open'),
   refreshBtn: document.getElementById('refresh'),
+  historyPanel: document.getElementById('history-panel'),
+  historyToggle: document.getElementById('history-toggle'),
+  historyClose: document.getElementById('history-close'),
+  historyList: document.getElementById('history-list'),
+  historyEmpty: document.getElementById('history-empty'),
+  clearHistory: document.getElementById('clear-history'),
+  themeToggle: document.getElementById('theme-toggle'),
+  themeIcon: document.getElementById('theme-icon'),
+  exportMd: document.getElementById('export-md'),
+  exportTxt: document.getElementById('export-txt'),
 };
 
 let currentUrl = '';
+let currentBullets = [];
+const HISTORY_KEY = 'tldr-history';
+const MAX_HISTORY = 50;
+
+/* ─── Theme ─── */
+function initTheme() {
+  const saved = localStorage.getItem('tldr-theme');
+  if (saved === 'light') {
+    document.body.classList.add('light');
+    updateThemeIcon(true);
+  }
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('tldr-theme', isLight ? 'light' : 'dark');
+  updateThemeIcon(isLight);
+}
+
+function updateThemeIcon(isLight) {
+  if (isLight) {
+    els.themeIcon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  } else {
+    els.themeIcon.innerHTML = '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+  }
+}
+
+/* ─── History ─── */
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistoryItem(data, bullets, url) {
+  const history = loadHistory();
+  const item = {
+    timestamp: Date.now(),
+    url,
+    title: data.title || 'Untitled Page',
+    host: data.host || '',
+    bullets,
+  };
+  if (history.length > 0 && history[0].url === url && JSON.stringify(history[0].bullets) === JSON.stringify(bullets)) {
+    history[0] = item;
+  } else {
+    history.unshift(item);
+  }
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderHistory() {
+  const history = loadHistory();
+  els.historyList.innerHTML = '';
+  if (history.length === 0) {
+    els.historyEmpty.classList.remove('hidden');
+    els.historyList.classList.add('hidden');
+    return;
+  }
+  els.historyEmpty.classList.add('hidden');
+  els.historyList.classList.remove('hidden');
+  history.forEach((item) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div class="history-title">${escapeHtml(item.title)}</div>
+      <div class="history-meta">
+        <span>${escapeHtml(item.host)}</span>
+        <span>${formatTime(item.timestamp)}</span>
+      </div>
+    `;
+    li.addEventListener('click', () => {
+      currentUrl = item.url;
+      showSummary({ title: item.title, host: item.host, paragraphs: [] }, item.bullets, item.url);
+      closeHistory();
+    });
+    els.historyList.appendChild(li);
+  });
+}
+
+function openHistory() {
+  renderHistory();
+  els.historyPanel.classList.remove('hidden');
+}
+
+function closeHistory() {
+  els.historyPanel.classList.add('hidden');
+}
+
+function clearHistoryAll() {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
 
 /* ─── Core: Extract text from the active tab ─── */
 async function getPageContent() {
@@ -150,6 +261,8 @@ function showLoading(msg) {
   els.statusText.textContent = msg;
   els.copyBtn.disabled = true;
   els.openBtn.disabled = true;
+  els.exportMd.disabled = true;
+  els.exportTxt.disabled = true;
 }
 
 function showSummary(data, bullets, url) {
@@ -164,14 +277,48 @@ function showSummary(data, bullets, url) {
     els.pageHost.textContent = data.host || 'unknown';
   }
 
-  els.bullets.innerHTML = bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('');
+  currentBullets = bullets;
 
-  const wordCount = data.paragraphs.join(' ').split(/\s+/).length;
-  els.wordCount.textContent = `${wordCount.toLocaleString()} words`;
-  els.readTime.textContent = `${Math.ceil(wordCount / 200)} min read`;
+  els.bullets.innerHTML = bullets.map(b => `
+    <li>
+      ${escapeHtml(b)}
+      <button class="bullet-copy" title="Copy bullet" aria-label="Copy bullet">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+      </button>
+    </li>
+  `).join('');
+
+  els.bullets.querySelectorAll('.bullet-copy').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const text = btn.parentElement.childNodes[0].textContent.trim();
+      await navigator.clipboard.writeText(text);
+      const original = btn.innerHTML;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => { btn.innerHTML = original; }, 1200);
+    });
+  });
+
+  const wordCount = (data.paragraphs || []).join(' ').split(/\s+/).length;
+  if (wordCount > 0) {
+    els.wordCount.textContent = `${wordCount.toLocaleString()} words`;
+    els.readTime.textContent = `${Math.ceil(wordCount / 200)} min read`;
+  } else {
+    els.wordCount.textContent = '';
+    els.readTime.textContent = '';
+  }
 
   els.copyBtn.disabled = false;
   els.openBtn.disabled = false;
+  els.exportMd.disabled = false;
+  els.exportTxt.disabled = false;
+
+  if (url) {
+    saveHistoryItem(data, bullets, url);
+  }
 }
 
 function showError(msg) {
@@ -181,6 +328,8 @@ function showError(msg) {
   els.errorText.textContent = msg;
   els.copyBtn.disabled = true;
   els.openBtn.disabled = true;
+  els.exportMd.disabled = true;
+  els.exportTxt.disabled = true;
 }
 
 function escapeHtml(text) {
@@ -205,7 +354,7 @@ async function run() {
 }
 
 els.copyBtn.addEventListener('click', async () => {
-  const text = Array.from(els.bullets.querySelectorAll('li')).map(li => `• ${li.textContent}`).join('\n');
+  const text = Array.from(els.bullets.querySelectorAll('li')).map(li => `• ${li.childNodes[0].textContent.trim()}`).join('\n');
   await navigator.clipboard.writeText(text);
   const original = els.copyBtn.innerHTML;
   els.copyBtn.innerHTML = '<span>Copied!</span>';
@@ -222,5 +371,47 @@ els.openBtn.addEventListener('click', () => {
 
 els.refreshBtn.addEventListener('click', () => run());
 
+els.historyToggle.addEventListener('click', () => {
+  if (els.historyPanel.classList.contains('hidden')) {
+    openHistory();
+  } else {
+    closeHistory();
+  }
+});
+els.historyClose.addEventListener('click', closeHistory);
+els.clearHistory.addEventListener('click', clearHistoryAll);
+
+els.themeToggle.addEventListener('click', toggleTheme);
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+els.exportMd.addEventListener('click', () => {
+  const title = els.pageTitle.textContent || 'Summary';
+  const host = els.pageHost.textContent || '';
+  let md = `# ${title}\n`;
+  if (host) md += `> ${host}\n\n`;
+  md += currentBullets.map(b => `- ${b}`).join('\n') + '\n';
+  const safeName = title.slice(0, 40).replace(/\s+/g, '_').replace(/[^\w_-]/g, '');
+  downloadFile(md, `${safeName}_summary.md`, 'text/markdown');
+});
+
+els.exportTxt.addEventListener('click', () => {
+  const title = els.pageTitle.textContent || 'Summary';
+  const host = els.pageHost.textContent || '';
+  let txt = `${title}\n${host ? host + '\n' : ''}\n`;
+  txt += currentBullets.map(b => `• ${b}`).join('\n') + '\n';
+  const safeName = title.slice(0, 40).replace(/\s+/g, '_').replace(/[^\w_-]/g, '');
+  downloadFile(txt, `${safeName}_summary.txt`, 'text/plain');
+});
+
 // Auto-run on open
 run();
+initTheme();
