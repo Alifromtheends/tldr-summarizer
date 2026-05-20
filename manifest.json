@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "TL;DR — 3-Bullet Page Summary",
+  "version": "1.0.0",
+  "description": "Summarize any webpage into three sharp bullet points. Works offline, no API keys, no tracking.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "action": {
+    "default_title": "Summarize this page",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
